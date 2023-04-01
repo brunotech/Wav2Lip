@@ -29,7 +29,7 @@ args = parser.parse_args()
 global_step = 0
 global_epoch = 0
 use_cuda = torch.cuda.is_available()
-print('use_cuda: {}'.format(use_cuda))
+print(f'use_cuda: {use_cuda}')
 
 syncnet_T = 5
 syncnet_mel_step_size = 16
@@ -47,7 +47,7 @@ class Dataset(object):
 
         window_fnames = []
         for frame_id in range(start_id, start_id + syncnet_T):
-            frame = join(vidname, '{}.jpg'.format(frame_id))
+            frame = join(vidname, f'{frame_id}.jpg')
             if not isfile(frame):
                 return None
             window_fnames.append(frame)
@@ -133,16 +133,14 @@ class Dataset(object):
 logloss = nn.BCELoss()
 def cosine_loss(a, v, y):
     d = nn.functional.cosine_similarity(a, v)
-    loss = logloss(d.unsqueeze(1), y)
-
-    return loss
+    return logloss(d.unsqueeze(1), y)
 
 def train(device, model, train_data_loader, test_data_loader, optimizer,
           checkpoint_dir=None, checkpoint_interval=None, nepochs=None):
 
     global global_step, global_epoch
     resumed_step = global_step
-    
+
     while global_epoch < nepochs:
         running_loss = 0.
         prog_bar = tqdm(enumerate(train_data_loader))
@@ -174,13 +172,13 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                 with torch.no_grad():
                     eval_model(test_data_loader, global_step, device, model, checkpoint_dir)
 
-            prog_bar.set_description('Loss: {}'.format(running_loss / (step + 1)))
+            prog_bar.set_description(f'Loss: {running_loss / (step + 1)}')
 
         global_epoch += 1
 
 def eval_model(test_data_loader, global_step, device, model, checkpoint_dir):
     eval_steps = 1400
-    print('Evaluating for {} steps'.format(eval_steps))
+    print(f'Evaluating for {eval_steps} steps')
     losses = []
     while 1:
         for step, (x, mel, y) in enumerate(test_data_loader):
@@ -219,24 +217,25 @@ def save_checkpoint(model, optimizer, step, checkpoint_dir, epoch):
     print("Saved checkpoint:", checkpoint_path)
 
 def _load(checkpoint_path):
-    if use_cuda:
-        checkpoint = torch.load(checkpoint_path)
-    else:
-        checkpoint = torch.load(checkpoint_path,
-                                map_location=lambda storage, loc: storage)
-    return checkpoint
+    return (
+        torch.load(checkpoint_path)
+        if use_cuda
+        else torch.load(
+            checkpoint_path, map_location=lambda storage, loc: storage
+        )
+    )
 
 def load_checkpoint(path, model, optimizer, reset_optimizer=False):
     global global_step
     global global_epoch
 
-    print("Load checkpoint from: {}".format(path))
+    print(f"Load checkpoint from: {path}")
     checkpoint = _load(path)
     model.load_state_dict(checkpoint["state_dict"])
     if not reset_optimizer:
         optimizer_state = checkpoint["optimizer"]
         if optimizer_state is not None:
-            print("Load optimizer state from {}".format(path))
+            print(f"Load optimizer state from {path}")
             optimizer.load_state_dict(checkpoint["optimizer"])
     global_step = checkpoint["global_step"]
     global_epoch = checkpoint["global_epoch"]
@@ -265,7 +264,9 @@ if __name__ == "__main__":
 
     # Model
     model = SyncNet().to(device)
-    print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
+    print(
+        f'total trainable params {sum(p.numel() for p in model.parameters() if p.requires_grad)}'
+    )
 
     optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad],
                            lr=hparams.syncnet_lr)

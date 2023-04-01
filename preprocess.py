@@ -29,15 +29,19 @@ parser.add_argument("--preprocessed_root", help="Root folder of the preprocessed
 
 args = parser.parse_args()
 
-fa = [face_detection.FaceAlignment(face_detection.LandmarksType._2D, flip_input=False, 
-									device='cuda:{}'.format(id)) for id in range(args.ngpu)]
+fa = [
+	face_detection.FaceAlignment(
+		face_detection.LandmarksType._2D, flip_input=False, device=f'cuda:{id}'
+	)
+	for id in range(args.ngpu)
+]
 
 template = 'ffmpeg -loglevel panic -y -i {} -strict -2 {}'
 # template2 = 'ffmpeg -hide_banner -loglevel panic -threads 1 -y -i {} -async 1 -ac 1 -vn -acodec pcm_s16le -ar 16000 {}'
 
 def process_video_file(vfile, args, gpu_id):
 	video_stream = cv2.VideoCapture(vfile)
-	
+
 	frames = []
 	while 1:
 		still_reading, frame = video_stream.read()
@@ -45,7 +49,7 @@ def process_video_file(vfile, args, gpu_id):
 			video_stream.release()
 			break
 		frames.append(frame)
-	
+
 	vidname = os.path.basename(vfile).split('.')[0]
 	dirname = vfile.split('/')[-2]
 
@@ -64,7 +68,7 @@ def process_video_file(vfile, args, gpu_id):
 				continue
 
 			x1, y1, x2, y2 = f
-			cv2.imwrite(path.join(fulldir, '{}.jpg'.format(i)), fb[j][y1:y2, x1:x2])
+			cv2.imwrite(path.join(fulldir, f'{i}.jpg'), fb[j][y1:y2, x1:x2])
 
 def process_audio_file(vfile, args):
 	vidname = os.path.basename(vfile).split('.')[0]
@@ -89,7 +93,7 @@ def mp_handler(job):
 		traceback.print_exc()
 		
 def main(args):
-	print('Started processing for {} with {} GPUs'.format(args.data_root, args.ngpu))
+	print(f'Started processing for {args.data_root} with {args.ngpu} GPUs')
 
 	filelist = glob(path.join(args.data_root, '*/*.mp4'))
 

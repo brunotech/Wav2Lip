@@ -41,10 +41,7 @@ args.img_size = 96
 
 def get_smoothened_boxes(boxes, T):
 	for i in range(len(boxes)):
-		if i + T > len(boxes):
-			window = boxes[len(boxes) - T:]
-		else:
-			window = boxes[i : i + T]
+		window = boxes[len(boxes) - T:] if i + T > len(boxes) else boxes[i : i + T]
 		boxes[i] = np.mean(window, axis=0)
 	return boxes
 
@@ -83,7 +80,7 @@ def face_detect(images):
 			if batch_size == 1:
 				raise RuntimeError('Image too big to run face detection on GPU')
 			batch_size //= 2
-			print('Recovering from OOM error; New batch size: {}'.format(batch_size))
+			print(f'Recovering from OOM error; New batch size: {batch_size}')
 			continue
 		break
 
@@ -97,7 +94,7 @@ def face_detect(images):
 		y2 = min(image.shape[0], rect[3] + pady2)
 		x1 = max(0, rect[0] - padx1)
 		x2 = min(image.shape[1], rect[2] + padx2)
-		
+
 		results.append([x1, y1, x2, y2])
 
 	boxes = get_smoothened_boxes(np.array(results), T=5)
@@ -168,27 +165,26 @@ def increase_frames(frames, l):
 
 mel_step_size = 16
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-print('Using {} for inference.'.format(device))
+print(f'Using {device} for inference.')
 
 detector = face_detection.FaceAlignment(face_detection.LandmarksType._2D, 
 											flip_input=False, device=device)
 
 def _load(checkpoint_path):
-	if device == 'cuda':
-		checkpoint = torch.load(checkpoint_path)
-	else:
-		checkpoint = torch.load(checkpoint_path,
-								map_location=lambda storage, loc: storage)
-	return checkpoint
+	return (
+		torch.load(checkpoint_path)
+		if device == 'cuda'
+		else torch.load(
+			checkpoint_path, map_location=lambda storage, loc: storage
+		)
+	)
 
 def load_model(path):
 	model = Wav2Lip()
-	print("Load checkpoint from: {}".format(path))
+	print(f"Load checkpoint from: {path}")
 	checkpoint = _load(path)
 	s = checkpoint["state_dict"]
-	new_s = {}
-	for k, v in s.items():
-		new_s[k.replace('module.', '')] = v
+	new_s = {k.replace('module.', ''): v for k, v in s.items()}
 	model.load_state_dict(new_s)
 
 	model = model.to(device)
@@ -201,12 +197,14 @@ def main():
 
 	if args.mode == 'dubbed':
 		files = listdir(args.data_root)
-		lines = ['{} {}'.format(f, f) for f in files]
+		lines = [f'{f} {f}' for f in files]
 
 	else:
 		assert args.filelist is not None
 		with open(args.filelist, 'r') as filelist:
 			lines = filelist.readlines()
+
+	temp_audio = '../temp/temp.wav'
 
 	for idx, line in enumerate(tqdm(lines)):
 		video, audio_src = line.strip().split()
@@ -214,10 +212,10 @@ def main():
 		audio_src = os.path.join(args.data_root, audio_src)
 		video = os.path.join(args.data_root, video)
 
-		command = 'ffmpeg -loglevel panic -y -i {} -strict -2 {}'.format(audio_src, '../temp/temp.wav')
+		command = (
+			f'ffmpeg -loglevel panic -y -i {audio_src} -strict -2 ../temp/temp.wav'
+		)
 		subprocess.call(command, shell=True)
-		temp_audio = '../temp/temp.wav'
-
 		wav = audio.load_wav(temp_audio, 16000)
 		mel = audio.melspectrogram(wav)
 
@@ -283,10 +281,10 @@ def main():
 
 			with torch.no_grad():
 				pred = model(mel_batch, img_batch)
-					
+
 
 			pred = pred.cpu().numpy().transpose(0, 2, 3, 1) * 255.
-			
+
 			for pl, f, c in zip(pred, frames, coords):
 				y1, y2, x1, x2 = c
 				pl = cv2.resize(pl.astype(np.uint8), (x2 - x1, y2 - y1))
@@ -295,9 +293,8 @@ def main():
 
 		out.release()
 
-		vid = os.path.join(args.results_dir, '{}.mp4'.format(idx))
-		command = 'ffmpeg -loglevel panic -y -i {} -i {} -strict -2 -q:v 1 {}'.format('../temp/temp.wav', 
-								'../temp/result.avi', vid)
+		vid = os.path.join(args.results_dir, f'{idx}.mp4')
+		command = f'ffmpeg -loglevel panic -y -i ../temp/temp.wav -i ../temp/result.avi -strict -2 -q:v 1 {vid}'
 		subprocess.call(command, shell=True)
 
 

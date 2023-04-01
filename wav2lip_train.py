@@ -32,7 +32,7 @@ args = parser.parse_args()
 global_step = 0
 global_epoch = 0
 use_cuda = torch.cuda.is_available()
-print('use_cuda: {}'.format(use_cuda))
+print(f'use_cuda: {use_cuda}')
 
 syncnet_T = 5
 syncnet_mel_step_size = 16
@@ -50,7 +50,7 @@ class Dataset(object):
 
         window_fnames = []
         for frame_id in range(start_id, start_id + syncnet_T):
-            frame = join(vidname, '{}.jpg'.format(frame_id))
+            frame = join(vidname, f'{frame_id}.jpg')
             if not isfile(frame):
                 return None
             window_fnames.append(frame)
@@ -87,16 +87,14 @@ class Dataset(object):
         mels = []
         assert syncnet_T == 5
         start_frame_num = self.get_frame_id(start_frame) + 1 # 0-indexing ---> 1-indexing
-        if start_frame_num - 2 < 0: return None
+        if start_frame_num < 2: return None
         for i in range(start_frame_num, start_frame_num + syncnet_T):
             m = self.crop_audio_window(spec, i - 2)
             if m.shape[0] != syncnet_mel_step_size:
                 return None
             mels.append(m.T)
 
-        mels = np.asarray(mels)
-
-        return mels
+        return np.asarray(mels)
 
     def prepare_window(self, window):
         # 3 x T x H x W
@@ -174,14 +172,12 @@ def save_sample_images(x, g, gt, global_step, checkpoint_dir):
     collage = np.concatenate((refs, inps, g, gt), axis=-2)
     for batch_idx, c in enumerate(collage):
         for t in range(len(c)):
-            cv2.imwrite('{}/{}_{}.jpg'.format(folder, batch_idx, t), c[t])
+            cv2.imwrite(f'{folder}/{batch_idx}_{t}.jpg', c[t])
 
 logloss = nn.BCELoss()
 def cosine_loss(a, v, y):
     d = nn.functional.cosine_similarity(a, v)
-    loss = logloss(d.unsqueeze(1), y)
-
-    return loss
+    return logloss(d.unsqueeze(1), y)
 
 device = torch.device("cuda" if use_cuda else "cpu")
 syncnet = SyncNet().to(device)
@@ -202,9 +198,9 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
     global global_step, global_epoch
     resumed_step = global_step
- 
+
     while global_epoch < nepochs:
-        print('Starting Epoch: {}'.format(global_epoch))
+        print(f'Starting Epoch: {global_epoch}')
         running_sync_loss, running_l1_loss = 0., 0.
         prog_bar = tqdm(enumerate(train_data_loader))
         for step, (x, indiv_mels, mel, gt) in prog_bar:
@@ -219,11 +215,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
             g = model(indiv_mels, x)
 
-            if hparams.syncnet_wt > 0.:
-                sync_loss = get_sync_loss(mel, g)
-            else:
-                sync_loss = 0.
-
+            sync_loss = get_sync_loss(mel, g) if hparams.syncnet_wt > 0. else 0.
             l1loss = recon_loss(g, gt)
 
             loss = hparams.syncnet_wt * sync_loss + (1 - hparams.syncnet_wt) * l1loss
@@ -237,11 +229,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             cur_session_steps = global_step - resumed_step
 
             running_l1_loss += l1loss.item()
-            if hparams.syncnet_wt > 0.:
-                running_sync_loss += sync_loss.item()
-            else:
-                running_sync_loss += 0.
-
+            running_sync_loss += sync_loss.item() if hparams.syncnet_wt > 0. else 0.
             if global_step == 1 or global_step % checkpoint_interval == 0:
                 save_checkpoint(
                     model, optimizer, global_step, checkpoint_dir, global_epoch)
@@ -253,15 +241,16 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                     if average_sync_loss < .75:
                         hparams.set_hparam('syncnet_wt', 0.01) # without image GAN a lesser weight is sufficient
 
-            prog_bar.set_description('L1: {}, Sync Loss: {}'.format(running_l1_loss / (step + 1),
-                                                                    running_sync_loss / (step + 1)))
+            prog_bar.set_description(
+                f'L1: {running_l1_loss / (step + 1)}, Sync Loss: {running_sync_loss / (step + 1)}'
+            )
 
         global_epoch += 1
         
 
 def eval_model(test_data_loader, global_step, device, model, checkpoint_dir):
     eval_steps = 700
-    print('Evaluating for {} steps'.format(eval_steps))
+    print(f'Evaluating for {eval_steps} steps')
     sync_losses, recon_losses = [], []
     step = 0
     while 1:
@@ -287,7 +276,7 @@ def eval_model(test_data_loader, global_step, device, model, checkpoint_dir):
                 averaged_sync_loss = sum(sync_losses) / len(sync_losses)
                 averaged_recon_loss = sum(recon_losses) / len(recon_losses)
 
-                print('L1: {}, Sync loss: {}'.format(averaged_recon_loss, averaged_sync_loss))
+                print(f'L1: {averaged_recon_loss}, Sync loss: {averaged_sync_loss}')
 
                 return averaged_sync_loss
 
@@ -306,28 +295,27 @@ def save_checkpoint(model, optimizer, step, checkpoint_dir, epoch):
 
 
 def _load(checkpoint_path):
-    if use_cuda:
-        checkpoint = torch.load(checkpoint_path)
-    else:
-        checkpoint = torch.load(checkpoint_path,
-                                map_location=lambda storage, loc: storage)
-    return checkpoint
+    return (
+        torch.load(checkpoint_path)
+        if use_cuda
+        else torch.load(
+            checkpoint_path, map_location=lambda storage, loc: storage
+        )
+    )
 
 def load_checkpoint(path, model, optimizer, reset_optimizer=False, overwrite_global_states=True):
     global global_step
     global global_epoch
 
-    print("Load checkpoint from: {}".format(path))
+    print(f"Load checkpoint from: {path}")
     checkpoint = _load(path)
     s = checkpoint["state_dict"]
-    new_s = {}
-    for k, v in s.items():
-        new_s[k.replace('module.', '')] = v
+    new_s = {k.replace('module.', ''): v for k, v in s.items()}
     model.load_state_dict(new_s)
     if not reset_optimizer:
         optimizer_state = checkpoint["optimizer"]
         if optimizer_state is not None:
-            print("Load optimizer state from {}".format(path))
+            print(f"Load optimizer state from {path}")
             optimizer.load_state_dict(checkpoint["optimizer"])
     if overwrite_global_states:
         global_step = checkpoint["global_step"]
@@ -354,14 +342,16 @@ if __name__ == "__main__":
 
     # Model
     model = Wav2Lip().to(device)
-    print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
+    print(
+        f'total trainable params {sum(p.numel() for p in model.parameters() if p.requires_grad)}'
+    )
 
     optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad],
                            lr=hparams.initial_learning_rate)
 
     if args.checkpoint_path is not None:
         load_checkpoint(args.checkpoint_path, model, optimizer, reset_optimizer=False)
-        
+
     load_checkpoint(args.syncnet_checkpoint_path, syncnet, None, reset_optimizer=True, overwrite_global_states=False)
 
     if not os.path.exists(checkpoint_dir):

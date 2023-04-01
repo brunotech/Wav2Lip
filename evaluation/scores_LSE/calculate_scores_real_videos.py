@@ -35,9 +35,9 @@ flist.sort()
 # ==================== GET OFFSETS ====================
 
 dists = []
-for idx, fname in enumerate(flist):
+for fname in flist:
     offset, conf, dist = s.evaluate(opt,videofile=fname)
-    print (str(dist)+" "+str(conf))
+    print(f"{str(dist)} {str(conf)}")
       
 # ==================== PRINT RESULTS TO FILE ====================
 
